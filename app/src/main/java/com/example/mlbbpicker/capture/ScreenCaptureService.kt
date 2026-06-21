@@ -36,6 +36,9 @@ class ScreenCaptureService : Service() {
 
         private const val NOTIFICATION_CHANNEL_ID = "screen_capture_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val ANALYSIS_FRAME_INTERVAL = 15
+        private const val DEBUG_SAVE_FRAME_INTERVAL = 120
+        private const val ANALYSIS_WIDTH = 1280
     }
 
     private var mediaProjection: MediaProjection? = null
@@ -181,8 +184,11 @@ class ScreenCaptureService : Service() {
                         CaptureStatus.isActive = true
                         CaptureStatus.statusMessage = "Capture: active"
 
-                        if (frameCounter % 120 == 0) {
-                            saveLatestFrame(image)
+                        if (frameCounter % ANALYSIS_FRAME_INTERVAL == 0) {
+                            processLatestFrame(
+                                image = image,
+                                saveDebugFiles = frameCounter % DEBUG_SAVE_FRAME_INTERVAL == 0
+                            )
                             updateNotification("Screen capture: active, frames: $frameCounter")
                         }
                     } catch (e: Exception) {
@@ -231,24 +237,28 @@ class ScreenCaptureService : Service() {
         )
     }
 
-    private fun saveLatestFrame(image: Image) {
+    private fun processLatestFrame(image: Image, saveDebugFiles: Boolean) {
         val bitmap = normalizeForDraft(imageToBitmap(image))
-        CaptureStatus.captureWidth = bitmap.width
-        CaptureStatus.captureHeight = bitmap.height
+        val analysisBitmap = resizeForAnalysis(bitmap)
+        CaptureStatus.captureWidth = analysisBitmap.width
+        CaptureStatus.captureHeight = analysisBitmap.height
 
         val picturesDir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)
             ?: filesDir
 
         val latestFile = java.io.File(picturesDir, "latest_capture.png")
 
-        java.io.FileOutputStream(latestFile).use { output ->
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+        if (saveDebugFiles) {
+            java.io.FileOutputStream(latestFile).use { output ->
+                analysisBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+            }
+
+            val cropsDir = java.io.File(picturesDir, "draft_crops")
+            com.example.mlbbpicker.draft.DraftCropper.saveDraftCrops(analysisBitmap, cropsDir)
+            CaptureStatus.lastSavedPath = latestFile.absolutePath
         }
 
-        val cropsDir = java.io.File(picturesDir, "draft_crops")
-        com.example.mlbbpicker.draft.DraftCropper.saveDraftCrops(bitmap, cropsDir)
-
-        val result = DraftAnalyzer.analyze(bitmap)
+        val result = DraftAnalyzer.analyze(analysisBitmap)
         CaptureStatus.bansDetected = result.bansDetected
         CaptureStatus.allyPicked = result.allyPicked
         CaptureStatus.enemyPicked = result.enemyPicked
@@ -258,9 +268,10 @@ class ScreenCaptureService : Service() {
         CaptureStatus.isBanPhase = result.isBanPhase
         CaptureStatus.analysisSource = "Live capture"
 
+        if (analysisBitmap !== bitmap) {
+            analysisBitmap.recycle()
+        }
         bitmap.recycle()
-
-        CaptureStatus.lastSavedPath = latestFile.absolutePath
     }
 
     private fun normalizeForDraft(bitmap: Bitmap): Bitmap {
@@ -283,6 +294,22 @@ class ScreenCaptureService : Service() {
         ).also {
             bitmap.recycle()
         }
+    }
+
+    private fun resizeForAnalysis(bitmap: Bitmap): Bitmap {
+        if (bitmap.width <= ANALYSIS_WIDTH) {
+            return bitmap
+        }
+
+        val targetHeight = (bitmap.height * (ANALYSIS_WIDTH.toFloat() / bitmap.width)).toInt()
+            .coerceAtLeast(1)
+
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            ANALYSIS_WIDTH,
+            targetHeight,
+            true
+        )
     }
 
     private fun List<Boolean>.toSlotText(): String {
