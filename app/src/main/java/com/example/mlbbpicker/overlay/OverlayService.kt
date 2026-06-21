@@ -148,6 +148,10 @@ class OverlayService : Service() {
                         append("\nFrames: ${CaptureStatus.frameCounter}")
                     }
 
+                    if (CaptureStatus.captureWidth > 0 && CaptureStatus.captureHeight > 0) {
+                        append("\nSize: ${CaptureStatus.captureWidth}x${CaptureStatus.captureHeight}")
+                    }
+
                     append("\nPhase: ${if (CaptureStatus.isBanPhase) "Ban" else "Pick/Other"}")
                     append("\nBans: ${CaptureStatus.bansDetected} detected")
                     append("\nAllies: ${CaptureStatus.allyPicked} picked")

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -20,6 +21,8 @@ import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import java.io.File
 import java.io.FileOutputStream
 import com.example.mlbbpicker.draft.DraftCropper
@@ -152,10 +155,10 @@ class ScreenCaptureService : Service() {
             captureHandler
         )
 
-        val metrics = resources.displayMetrics
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
-        val density = metrics.densityDpi
+        val captureConfig = getLandscapeCaptureConfig()
+        val width = captureConfig.width
+        val height = captureConfig.height
+        val density = captureConfig.densityDpi
 
         CaptureStatus.captureWidth = width
         CaptureStatus.captureHeight = height
@@ -206,8 +209,32 @@ class ScreenCaptureService : Service() {
         CaptureStatus.statusMessage = "VirtualDisplay created"
     }
 
+    private data class CaptureConfig(
+        val width: Int,
+        val height: Int,
+        val densityDpi: Int
+    )
+
+    private fun getLandscapeCaptureConfig(): CaptureConfig {
+        val metrics = DisplayMetrics()
+
+        @Suppress("DEPRECATION")
+        getSystemService(WindowManager::class.java).defaultDisplay.getRealMetrics(metrics)
+
+        val rawWidth = metrics.widthPixels.coerceAtLeast(1)
+        val rawHeight = metrics.heightPixels.coerceAtLeast(1)
+
+        return CaptureConfig(
+            width = maxOf(rawWidth, rawHeight),
+            height = minOf(rawWidth, rawHeight),
+            densityDpi = metrics.densityDpi
+        )
+    }
+
     private fun saveLatestFrame(image: Image) {
-        val bitmap = imageToBitmap(image)
+        val bitmap = normalizeForDraft(imageToBitmap(image))
+        CaptureStatus.captureWidth = bitmap.width
+        CaptureStatus.captureHeight = bitmap.height
 
         val picturesDir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)
             ?: filesDir
@@ -234,6 +261,28 @@ class ScreenCaptureService : Service() {
         bitmap.recycle()
 
         CaptureStatus.lastSavedPath = latestFile.absolutePath
+    }
+
+    private fun normalizeForDraft(bitmap: Bitmap): Bitmap {
+        if (bitmap.width >= bitmap.height) {
+            return bitmap
+        }
+
+        val matrix = Matrix().apply {
+            postRotate(90f)
+        }
+
+        return Bitmap.createBitmap(
+            bitmap,
+            0,
+            0,
+            bitmap.width,
+            bitmap.height,
+            matrix,
+            true
+        ).also {
+            bitmap.recycle()
+        }
     }
 
     private fun List<Boolean>.toSlotText(): String {
