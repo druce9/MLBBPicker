@@ -21,7 +21,7 @@ object DraftAnalyzer {
         val allySlots = if (banPhase) {
             List(5) { false }
         } else {
-            DraftLayout.allyPickSlots.map { rect ->
+            DraftLayout.allyPickDetectionSlots.map { rect ->
                 val crop = crop(bitmap, rect)
                 val filled = isAllyPickSlotFilled(crop)
                 crop.recycle()
@@ -32,7 +32,7 @@ object DraftAnalyzer {
         val enemySlots = if (banPhase) {
             List(5) { false }
         } else {
-            DraftLayout.enemyPickSlots.map { rect ->
+            DraftLayout.enemyPickDetectionSlots.map { rect ->
                 val crop = crop(bitmap, rect)
                 val filled = isEnemyPickSlotFilled(crop)
                 crop.recycle()
@@ -61,45 +61,27 @@ object DraftAnalyzer {
     private fun isBanSlotFilled(slotBitmap: Bitmap): Boolean {
         val stats = computeStats(slotBitmap)
 
-        return stats.edgeMean > 8.0 && stats.lumaStd > 30.0
+        return stats.edgeMean > 12.0 && stats.lumaStd > 30.0
     }
 
     private fun isAllyPickSlotFilled(slotBitmap: Bitmap): Boolean {
-        val wide = computeStats(slotBitmap)
-
-        val leftStrip = cropRelative(
-            slotBitmap,
-            0.00f,
-            0.00f,
-            0.38f,
-            1.00f
-        )
-
-        val rightStrip = cropRelative(
-            slotBitmap,
-            0.69f,
-            0.00f,
-            1.00f,
-            1.00f
-        )
-
-        val leftStats = computeStats(leftStrip)
-        val rightStats = computeStats(rightStrip)
-
-        leftStrip.recycle()
-        rightStrip.recycle()
+        val stats = computeStats(slotBitmap)
 
         val baseLooksLikePortrait =
-            wide.edgeMean > 5.5 && wide.lumaStd > 28.0
+            stats.edgeMean > 9.0 && stats.lumaStd > 24.0
 
         // Пустые союзные слоты часто светло-синие из-за подсветки/логотипа.
         val looksLikeEmptyBlueSlot =
-            leftStats.blueRatio > 0.70 && leftStats.lumaMean > 90.0
+            stats.blueRatio > 0.68 &&
+                    stats.saturationRatio > 0.62 &&
+                    stats.skinRatio < 0.05
 
         // Иногда пустой слот с логотипом игрока даёт много текстуры.
         // Этот фильтр отсекает такие "ложные портреты".
         val looksLikeEmptyLogoSlot =
-            rightStats.edgeMean > 8.8 && rightStats.darkRatio > 0.45
+            stats.skinRatio < 0.02 &&
+                    stats.saturationRatio > 0.45 &&
+                    stats.whiteRatio > 0.10
 
         return baseLooksLikePortrait &&
                 !looksLikeEmptyBlueSlot &&
@@ -111,7 +93,7 @@ object DraftAnalyzer {
 
         // Справа пустые красные слоты тоже яркие,
         // поэтому делаем порог по текстуре строже.
-        return stats.edgeMean > 6.0 && stats.lumaStd > 30.0
+        return stats.edgeMean > 7.0 && stats.lumaStd > 32.0
     }
 
     private fun redRatio(bitmap: Bitmap, rect: NormRect): Double {
@@ -153,27 +135,15 @@ object DraftAnalyzer {
         return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
     }
 
-    private fun cropRelative(
-        bitmap: Bitmap,
-        leftRatio: Float,
-        topRatio: Float,
-        rightRatio: Float,
-        bottomRatio: Float
-    ): Bitmap {
-        val left = (bitmap.width * leftRatio).roundToInt().coerceIn(0, bitmap.width - 1)
-        val top = (bitmap.height * topRatio).roundToInt().coerceIn(0, bitmap.height - 1)
-        val right = (bitmap.width * rightRatio).roundToInt().coerceIn(left + 1, bitmap.width)
-        val bottom = (bitmap.height * bottomRatio).roundToInt().coerceIn(top + 1, bitmap.height)
-
-        return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
-    }
-
     private data class Stats(
         val lumaMean: Double,
         val lumaStd: Double,
         val edgeMean: Double,
         val blueRatio: Double,
-        val darkRatio: Double
+        val darkRatio: Double,
+        val saturationRatio: Double,
+        val skinRatio: Double,
+        val whiteRatio: Double
     )
 
     private fun computeStats(bitmap: Bitmap): Stats {
@@ -187,6 +157,9 @@ object DraftAnalyzer {
 
         var bluePixels = 0
         var darkPixels = 0
+        var saturatedPixels = 0
+        var skinPixels = 0
+        var whitePixels = 0
 
         val step = 2
 
@@ -197,6 +170,8 @@ object DraftAnalyzer {
                 val r = Color.red(pixel).toDouble()
                 val g = Color.green(pixel).toDouble()
                 val b = Color.blue(pixel).toDouble()
+                val maxChannel = maxOf(r, g, b)
+                val minChannel = minOf(r, g, b)
 
                 val luma = 0.299 * r + 0.587 * g + 0.114 * b
 
@@ -210,6 +185,18 @@ object DraftAnalyzer {
 
                 if (luma < 35.0) {
                     darkPixels++
+                }
+
+                if (maxChannel - minChannel > 45.0) {
+                    saturatedPixels++
+                }
+
+                if (r > 80.0 && g > 45.0 && b < r * 0.95 && g < r * 0.95) {
+                    skinPixels++
+                }
+
+                if (luma > 145.0 && maxChannel - minChannel < 70.0) {
+                    whitePixels++
                 }
 
                 if (x + step < bitmap.width) {
@@ -236,7 +223,10 @@ object DraftAnalyzer {
             lumaStd = sqrt(variance.coerceAtLeast(0.0)),
             edgeMean = if (edgeCount == 0) 0.0 else edgeSum / edgeCount,
             blueRatio = if (count == 0) 0.0 else bluePixels.toDouble() / count.toDouble(),
-            darkRatio = if (count == 0) 0.0 else darkPixels.toDouble() / count.toDouble()
+            darkRatio = if (count == 0) 0.0 else darkPixels.toDouble() / count.toDouble(),
+            saturationRatio = if (count == 0) 0.0 else saturatedPixels.toDouble() / count.toDouble(),
+            skinRatio = if (count == 0) 0.0 else skinPixels.toDouble() / count.toDouble(),
+            whiteRatio = if (count == 0) 0.0 else whitePixels.toDouble() / count.toDouble()
         )
     }
 

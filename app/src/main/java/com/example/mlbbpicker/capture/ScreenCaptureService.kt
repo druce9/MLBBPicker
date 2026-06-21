@@ -225,11 +225,19 @@ class ScreenCaptureService : Service() {
         CaptureStatus.bansDetected = result.bansDetected
         CaptureStatus.allyPicked = result.allyPicked
         CaptureStatus.enemyPicked = result.enemyPicked
+        CaptureStatus.banSlotsText = result.banSlots.toSlotText()
+        CaptureStatus.allySlotsText = result.allySlots.toSlotText()
+        CaptureStatus.enemySlotsText = result.enemySlots.toSlotText()
+        CaptureStatus.isBanPhase = result.isBanPhase
         CaptureStatus.analysisSource = "Live capture"
 
         bitmap.recycle()
 
         CaptureStatus.lastSavedPath = latestFile.absolutePath
+    }
+
+    private fun List<Boolean>.toSlotText(): String {
+        return joinToString(separator = "") { if (it) "1" else "0" }
     }
 
     private fun imageToBitmap(image: Image): Bitmap {
