@@ -79,9 +79,9 @@ object DraftAnalyzer {
         // Иногда пустой слот с логотипом игрока даёт много текстуры.
         // Этот фильтр отсекает такие "ложные портреты".
         val looksLikeEmptyLogoSlot =
-            stats.skinRatio < 0.02 &&
-                    stats.saturationRatio > 0.45 &&
-                    stats.whiteRatio > 0.10
+            stats.skinRatio < 0.04 &&
+                    stats.whiteRatio > 0.10 &&
+                    (stats.saturationRatio > 0.45 || stats.darkRatio > 0.20)
 
         return baseLooksLikePortrait &&
                 !looksLikeEmptyBlueSlot &&
